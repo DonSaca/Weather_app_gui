@@ -32,7 +32,7 @@ class MainWindow(QMainWindow):
         control_frame.setStyleSheet("background-color: white; border-radius: 12px; border: 1px solid #e5e7eb;")
         control_layout = QVBoxLayout(control_frame)
         
-        lbl_title = QLabel("Validação do Modelo")
+        lbl_title = QLabel("Menu")
         lbl_title.setStyleSheet("font-size: 18px; font-weight: bold; border: none; color: #374151;")
         
         self.date_edit = QDateEdit()
