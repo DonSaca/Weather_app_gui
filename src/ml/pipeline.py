@@ -1,18 +1,37 @@
+import os
+import sys
 import numpy as np
 import pandas as pd
 import joblib
 import tensorflow as tf
 
+def get_asset_path(relative_path):
+    """Resolve correct path for PyInstaller or local execution."""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 class WeatherModelWrapper:
     def __init__(self, models_dir="models"):
+        # Resolve paths
+        scaler_feat_path = get_asset_path(f"{models_dir}/scaler_features.joblib")
+        scaler_tgt_path = get_asset_path(f"{models_dir}/scaler_target.joblib")
+        lstm_path = get_asset_path(f"{models_dir}/weather_predictor_LSTM.keras")
+        transformer_path = get_asset_path(f"{models_dir}/weather_predictor_transformer.keras")
+
+        # Validation: Alert immediately if assets are missing
+        for path in [scaler_feat_path, scaler_tgt_path, lstm_path, transformer_path]:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Ficheiro de modelo em falta: {path}")
+
         # Load scalers
-        self.scaler_features = joblib.load(f"{models_dir}/scaler_features.joblib")
-        self.scaler_target = joblib.load(f"{models_dir}/scaler_target.joblib")
+        self.scaler_features = joblib.load(scaler_feat_path)
+        self.scaler_target = joblib.load(scaler_tgt_path)
         
-        # Pre-load both models to memory to prevent UI freezing on switch
+        # Pre-load models
         self.models = {
-            "LSTM": tf.keras.models.load_model(f"{models_dir}/weather_predictor_LSTM.keras"),
-            "Transformer": tf.keras.models.load_model(f"{models_dir}/weather_predictor_transformer.keras")
+            "LSTM": tf.keras.models.load_model(lstm_path),
+            "Transformer": tf.keras.models.load_model(transformer_path)
         }
         
         self.feature_order = [
@@ -24,7 +43,6 @@ class WeatherModelWrapper:
         ]
 
     def engineer_features(self, df: pd.DataFrame) -> np.ndarray:
-        # Calculate derived features
         df['temp_max_lag_1'] = df['temp_max'].shift(1)
         df['temp_max_lag_2'] = df['temp_max'].shift(2)
         df['temp_max_lag_3'] = df['temp_max'].shift(3)
@@ -35,20 +53,14 @@ class WeatherModelWrapper:
         df['pressure_tendency'] = df['pressure_mean'] - df['pressure_mean'].shift(1)
         df['precip_accum_7d'] = df['precip_total'].rolling(window=7).sum()
 
-        # Enforce exact column order
         df = df[self.feature_order]
-        
-        # Take the last 7 days (this drops the initial 7 days used for building the rolling metrics)
         df_window = df.tail(7)
         
-        # Scale and reshape to (1, 7, 20)
         scaled_features = self.scaler_features.transform(df_window.values)
         return scaled_features.reshape(1, 7, 20)
 
     def predict(self, model_name: str, tensor_input: np.ndarray) -> float:
         model = self.models[model_name]
         scaled_prediction = model.predict(tensor_input, verbose=0)
-        
-        # Inverse transform the (1, 1) prediction
         celsius_pred = self.scaler_target.inverse_transform(scaled_prediction)
         return float(celsius_pred[0][0])

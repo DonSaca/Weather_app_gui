@@ -8,13 +8,12 @@ requests_cache.install_cache('meteo_cache', expire_after=3600)
 class OpenMeteoClient:
     def __init__(self):
         self.base_url = "https://archive-api.open-meteo.com/v1/archive"
-        self.lat = 38.7167  # Lisbon
-        self.lon = -9.1333  # Lisbon
+        self.lat = 38.7167
+        self.lon = -9.1333
         self.timezone = "Europe/Lisbon"
 
     def get_14_day_dataframe(self, target_date: str) -> pd.DataFrame:
         target = datetime.strptime(target_date, "%Y-%m-%d")
-        # Fetch 14 days prior to target date to build 7-day accumulators and lags
         start_date = (target - timedelta(days=14)).strftime("%Y-%m-%d")
         end_date = (target - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -34,12 +33,14 @@ class OpenMeteoClient:
         response = requests.get(self.base_url, params=params)
         response.raise_for_status()
         
-        hourly_data = response.json()['hourly']
-        df = pd.DataFrame(hourly_data)
+        data = response.json()
+        if 'hourly' not in data or not data['hourly'].get('time'):
+            raise ValueError("Não existem dados horários disponíveis para o período selecionado.")
+
+        df = pd.DataFrame(data['hourly'])
         df['time'] = pd.to_datetime(df['time'])
         df.set_index('time', inplace=True)
         
-        # Resample hourly to daily aggregates
         daily_df = df.resample('D').agg(
             temp_max=('temperature_2m', 'max'),
             temp_min=('temperature_2m', 'min'),
@@ -66,4 +67,9 @@ class OpenMeteoClient:
         }
         response = requests.get(self.base_url, params=params)
         response.raise_for_status()
-        return response.json()['daily']['temperature_2m_max'][0]
+        
+        data = response.json()
+        try:
+            return float(data['daily']['temperature_2m_max'][0])
+        except (KeyError, IndexError, TypeError):
+            raise ValueError("Dados reais (ground truth) ainda não disponíveis no arquivo para esta data.")
